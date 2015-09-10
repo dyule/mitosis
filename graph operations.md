@@ -1,4 +1,5 @@
 Node Types:
+----------
 
  - File Entity
  - File Data
@@ -6,6 +7,7 @@ Node Types:
  - Revision
 
 Relationship Types
+----------
 
  - Contained (data - data)
  - Occurred (revision - command)
@@ -17,12 +19,14 @@ Relationship Types
  - Part Of (operation - command)
 
 Command Types
+----------
 
  - Create
  - Delete
  - Update
 
 For CREATE
+----------
 
  - create a new entity
  - create a new command
@@ -33,6 +37,7 @@ For CREATE
  - associate data with its parent via contained
 
 For DELETE
+----------
 
  - create new command
  - associate command with current revision via occurred
@@ -42,6 +47,7 @@ For DELETE
  - delete instance of relationship
 
 For UPDATE
+----------
 
  - create new command
  - create constituent operations
@@ -55,6 +61,7 @@ For UPDATE
 
 
 Operation Types
+----------
 
  - Insert
  - Remove
