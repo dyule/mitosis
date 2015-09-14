@@ -211,7 +211,7 @@ def commit_delete_commands(context):
     """
     # context.repository.delete_file(context.mapping["A"])
     context.repository.delete_folder(context.mapping["E"])
-    context.this_rev, _ = context.repository.commit(context.this_rev)
+    #context.this_rev, _ = context.repository.commit(context.this_rev)
 
 
 @then("The repository no longer contains the deleted files")
