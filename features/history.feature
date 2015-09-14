@@ -16,6 +16,12 @@ Feature: Commiting Changes
 
   @database
   Scenario: Committing Delete Commands
-    Given A repository with some files in in
+    Given A repository with some files in it
     When I commit delete commands
     Then The repository records that the file entities have been deleted
+
+  @database
+  Scenario: Committing Modify Commands
+    Given A repository with some files in it
+    When I commit some modify commands
+    Then The repository records the modifications to the files

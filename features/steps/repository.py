@@ -91,11 +91,11 @@ def check_for_added_files(context):
     assert_that(len(commands_associated[0]['data']), is_(6), "We found 6 commands")
 
     # Make sure that the commit updated the current revision and left nothing behind.
-    result = context.connection.post(Statement("MATCH (:HEAD) <-[:AT]- (r:REVISION) return r"))
+    result = context.connection.post(Statement("MATCH (:BRANCH {name:'head'}) <-[:AT]- (r:REVISION) return r"))
 
     assert_that(len(result[0]['data']), is_(1), "There was only one current revision")
 
-    result = context.connection.post(Statement("MATCH (:HEAD) <-[:AT]- (r:REVISION) -[:APPLIED_TO]-> (n) return n"))
+    result = context.connection.post(Statement("MATCH (:BRANCH {name: 'head'}) <-[:AT]- (r:REVISION) -[:APPLIED_TO]-> (n) return n"))
 
     assert_that(len(result[0]['data']), is_(0), "The new revision has no commands associated with it")
 
@@ -120,7 +120,7 @@ def repository_is_initialized(context):
     :type context behave.runner.Context
     """
     result = context.connection.post(Statement("MATCH (r:REVISION) return r, id(r)"),
-                                     Statement("MATCH (h:HEAD) return h, id(h)"),
+                                     Statement('MATCH (h:BRANCH {name: "head"}) return h, id(h)'),
                                      Statement("MATCH (n) return n"))
 
     assert_that(len(result), is_(3), "We found both the first revision and the root file entity")
@@ -129,8 +129,7 @@ def repository_is_initialized(context):
     assert_that(len(result[2]['data']), is_(2), "There was only two nodes: the revision and the head")
 
 
-
-@given("A repository with some files in in")
+@given("A repository with some files in it")
 def repository_with_files(context):
     """
     :type context behave.runner.Context
@@ -172,3 +171,43 @@ def check_for_deleted_files(context):
 
     assert_that(data, is_({'{"content":"SW50ZXJpb3Igc3R1ZmY=","filename":"File F","type":"file"}',
                            '{"content":"VGhpcyBpcyB0aGUgZmlsZSdzIGNvbnRlbnQ=","filename":"File A","type":"file"}'}))
+
+
+@when("I commit some modify commands")
+def commit_modify_commands(context):
+    """
+    :type context behave.runner.Context
+    """
+    context.repository.modify_file(context.mapping["C"], {'type': 'insert', 'content': 'words', 'location': 5},
+                                                         {'type': 'remove', 'length': 2, 'location': 6})
+    context.repository.modify_file(context.mapping["D"], {'type': 'remove', 'length': 6, 'location': 2})
+
+    context.old_rev = context.this_rev
+    context.this_rev, _ = context.repository.commit(context.this_rev)
+
+
+@then("The repository records the modifications to the files")
+def check_for_modified_files(context):
+    """
+    :type context behave.runner.Context
+    """
+    commands = context.connection.post(Statement("MATCH (r) <-- (c:COMMAND) --> (e:FILE_ENTITY) "
+                                                 "<-- (c1:COMMAND) where id(r) = {} return c, c1"
+                                                 .format(context.old_rev)))[0]['data']
+
+    assert_that(len(commands), is_(2))
+    assert_that(commands[0]['row'][0]['type'], is_("modify"), "We associated a delete command with the revision")
+    assert_that(commands[1]['row'][0]['type'], is_("modify"), "We associated a delete command with the revision")
+
+    assert_that(commands[0]['row'][1]['type'], is_("create"), "The delete command was preceded by a create command")
+    assert_that(commands[1]['row'][1]['type'], is_("create"), "The delete command was preceded by a create command")
+
+    data = {commands[0]['row'][1]['data'], commands[1]['row'][1]['data']}
+
+    assert_that(data, is_({'{"content":"U29tZSBvdGhlciBjb250ZW50","filename":"File C","type":"file"}',
+                           '{"content":"U3RpbGwgbW9yZSBjb250ZW50","filename":"File D","type":"file"}'}))
+
+    long_ops = context.connection.post(Statement("MATCH p = (c:COMMAND) -[:FIRST_OP]-> "
+                                                 "(o1:OPERATION) -[:NEXT_OP]-> (o2:OPERATION) return p"))[0]
+    print()
+    print(long_ops)

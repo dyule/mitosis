@@ -34,7 +34,7 @@ class History:
         """
         Create the repository in the database.  Creates a starting revision and root file entity and data.
         """
-        self.connection.post(Statement('CREATE (h:HEAD) <-[:AT]- (r:REVISION)'))
+        self.connection.post(Statement('CREATE (b:BRANCH {name:"head"}) <-[:AT]- (r:REVISION)'))
 
     def create_file(self, **data):
         """
@@ -71,6 +71,19 @@ class History:
         }
         self._lookup_ids.add(file_id)
 
+    def modify_file(self, file_id, *operations):
+        statement = "CREATE (revision) <-[:OCCURRED]- (c_{0}:COMMAND {{command_{0}}}) " \
+                    "-[:APPLIED_TO]-> (e_{0}), (c_{0}) -[:FIRST_OP]-> ".format(file_id)
+        operation_statements = ["(:OPERATION {{op_{0}_{1}}})".format(file_id, index) for index in range(len(operations))]
+        self._parameters['command_' + str(file_id)] = {
+            'type': "modify",
+        }
+        for operation_index in range(len(operations)):
+            self._parameters['op_' + str(file_id) + '_' + str(operation_index)] = operations[operation_index]
+
+        self._statements.append(statement + " -[:NEXT_OP]-> ".join(operation_statements))
+        self._lookup_ids.add(file_id)
+
     def commit(self, parent_revision):
         """
         Commit all commands that have been created so far.  Finishes this revision and advances to the next one
@@ -93,8 +106,8 @@ class History:
         results = self.connection.post(Statement(merged_statement, self._parameters),
                                        Statement("MATCH (old_rev:REVISION)  WHERE id(old_rev) = {} "
                                                  .format(parent_revision) +
-                                                 "OPTIONAL MATCH (old_rev) -[a:AT]-> (head:HEAD) "
-                                                 "CREATE (head) <-[:AT]- (n:REVISION) <-[:NEXT_COMMAND]- (old_rev) "
+                                                 "OPTIONAL MATCH (old_rev) -[a:AT]-> (branch:BRANCH) "
+                                                 "CREATE (branch) <-[:AT]- (n:REVISION) <-[:NEXT_COMMAND]- (old_rev) "
                                                  "DELETE a "
                                                  "RETURN id(n) "))
         mapping = {"temp_{}".format(i + 1): results[0]['data'][0]['row'][i] for i in range(self._max_id - 1)}
