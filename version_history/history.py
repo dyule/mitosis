@@ -1,5 +1,6 @@
 from base64 import b64encode
 from codecs import decode
+import json
 from version_history.connection import Statement
 
 
@@ -14,13 +15,11 @@ class History:
         """
         self.connection = connection
         # Find the root file entity
-        result = self.connection.find("FILE_ENTITY", {'is_root': True})
+        result = self.connection.find("REVISION")
         # If there isn't one, then initialize the repository
 
-        if len(result) != 1:
+        if len(result) < 1:
             self._intitialze_repo()
-        else:
-            self.root_entity_id = result[0][0]
 
         #: The statements that will update the database to reflect the commands so far this revision
         self._statements = []
@@ -35,103 +34,42 @@ class History:
         """
         Create the repository in the database.  Creates a starting revision and root file entity and data.
         """
-        result = self.connection.post(Statement('CREATE (h:HEAD) <-[:AT]- (r:REVISION),'
-                                                '(e:FILE_ENTITY {is_root: true, type: "root"}) '
-                                                '<-[:INSTANCE_OF]- (d:FILE_DATA {data: ""})'
-                                                'RETURN id(e)'))
-        self.root_entity_id = result[0]['data'][0]['row'][0]
+        self.connection.post(Statement('CREATE (h:HEAD) <-[:AT]- (r:REVISION)'))
 
-    def create_file(self, parent_id, filename, content):
+    def create_file(self, **data):
         """
         Creates a new file creation command in the repository.  The file won't be created until the :meth:`commit`
         method is called.
 
-        :param string|int parent_id: The ID of the parent of this file
-        :param filename: The name of this file
-        :param content: The content of this file
+        :param dict[str, any] data: The data associated with this file entity.  This includes filename, file type,
+                                    parent folders, and anything else required.  This structure is up to the user
+                                    of this class, this class only worries about storing the data
         :return: The temporary id of this file
         :rtype: str
         """
+        def encode_bytes(b):
+            return decode(b64encode(b), "ascii")
         new_id = "temp_" + str(self._max_id)
         self._max_id += 1
-        if not str(parent_id).startswith("temp"):
-            self._lookup_ids.add(parent_id)
         statement = "CREATE (revision) <-[:OCCURRED]- (c_{0}:COMMAND {{command_{0}}}) " \
-                    "-[:APPLIED_TO]-> (e_{0}:FILE_ENTITY {{entity_{0}}}) " \
-                    "<-[:INSTANCE_OF]- (d_{0}:FILE_DATA {{data_{0}}}) " \
-                    "<-[:CONTAINED]- (d_{1})".format(new_id, parent_id)
-        data = decode(b64encode(content), "ascii")
+                    "-[:APPLIED_TO]-> (e_{0}:FILE_ENTITY {{entity_{0}}})".format(new_id)
         self._statements.append(statement)
         self._parameters["command_" + new_id] = {
-            "type": "create_file",
-            "file_name": filename,
-            "data": data
+            "type": "create",
+            "data": json.dumps(data, separators=(",", ":"), sort_keys=True, default=encode_bytes),
         }
         self._parameters["entity_" + new_id] = {
-            "type": "file",
-        }
-        self._parameters["data_" + new_id] = {
-            "file_name": filename,
-            "data": data,
-        }
-        return new_id
-
-    def create_directory(self, parent_id, filename):
-        """
-        Creates a new directory creation command in the repository.  The directory won't be created until the :meth:`commit`
-        method is called.
-
-        :param string|int parent_id: The ID of the parent of this directory
-        :param filename: The name of this directory
-        :return: The temporary id of this directory
-        :rtype: str
-        """
-
-        new_id = "temp_" + str(self._max_id)
-        self._max_id += 1
-        if not str(parent_id).startswith("temp"):
-            self._lookup_ids.add(parent_id)
-        statement = "CREATE (revision) <-[:OCCURRED]- (c_{0}:COMMAND {{command_{0}}}) " \
-                    "-[:APPLIED_TO]-> (e_{0}:FILE_ENTITY {{entity_{0}}}) " \
-                    "<-[:INSTANCE_OF]- (d_{0}:FILE_DATA {{data_{0}}}) " \
-                    "<-[:CONTAINED]- (d_{1})".format(new_id, parent_id)
-        self._statements.append(statement)
-        self._parameters["command_" + new_id] = {
-            "type": "create_folder",
-            "file_name": filename,
-        }
-        self._parameters["entity_" + new_id] = {
-            "type": "folder",
-        }
-        self._parameters["data_" + new_id] = {
-            "file_name": filename,
         }
         return new_id
 
     def delete_file(self, file_id):
-        statement = "MATCH (d_{0}) -[r]- () " \
-                    "CREATE (revision) <-[:OCCURRED]- (c_{0}:COMMAND {{command_{0}}}) " \
-                    "-[:APPLIED_TO]-> (e_{0}) " \
-                    "DELETE r, d_{0}".format(file_id)
+        statement = "CREATE (revision) <-[:OCCURRED]- (c_{0}:COMMAND {{command_{0}}}) " \
+                    "-[:APPLIED_TO]-> (e_{0}) ".format(file_id)
         self._statements.append(statement)
         self._parameters['command_' + str(file_id)] = {
-            'type': "delete_file",
+            'type': "delete",
         }
         self._lookup_ids.add(file_id)
-
-    def delete_folder(self, folder_id):
-        statement = "CREATE (revision) <-[:OCCURRED]- (c_{0}:COMMAND {{command_{0}}}) WITH " \
-                    "MATCH path = (d_{0}) -[:CONTAINED*]-> (:FILE_DATA) " \
-                    "-[:APPLIED_TO]-> (e_{0}) " \
-                    "UNWIND nodes(path) AS n_{0} " \
-                    "MATCH n_{0} -[r]- () " \
-                    "DELETE n_{0}, r".format(folder_id)
-
-        self._statements.append(statement)
-        self._parameters['command_' + str(folder_id)] = {
-            'type': "delete_folder",
-        }
-        self._lookup_ids.add(folder_id)
 
     def commit(self, parent_revision):
         """
@@ -144,7 +82,7 @@ class History:
         """
         # TODO make sure that there have been commands performed, or don't do anything
         match_statements = ["MATCH (revision:REVISION) WHERE id(revision) = {} ".format(parent_revision)] + \
-                           ["MATCH (e_{0}) <-[:INSTANCE_OF]- (d_{0}) WHERE id(e_{0}) = {0}".format(obj_id)
+                           ["MATCH (e_{0}) WHERE id(e_{0}) = {0}".format(obj_id)
                             for obj_id in self._lookup_ids]
         return_clauses = ["id(e_temp_{})".format(new_id) for new_id in range(1, self._max_id)]
         merged_statement = "\n".join(match_statements + self._statements)

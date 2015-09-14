@@ -1,4 +1,5 @@
-
+from base64 import b64encode
+from codecs import decode
 import json
 from io import StringIO
 import requests
@@ -141,6 +142,32 @@ class Statement:
 
         :param writer: A file like object
         """
+        def write_dict(d):
+            writer.write('{')
+            first = True
+            for k, v in d.items():
+                if first:
+                    first = False
+                else:
+                    writer.write(",")
+                writer.write("\\\"")
+                writer.write(k)
+                writer.write("\\\":")
+                if v is None:
+                    writer.write("null")
+                elif isinstance(v, str):
+                    writer.write("\\\"")
+                    writer.write(v)
+                    writer.write("\\\"")
+                elif isinstance(v, bool) or isinstance(v, int):
+                    writer.write(v)
+                elif isinstance(v, bytes) or isinstance(v, bytearray):
+                    writer.write("\\\"")
+                    writer.write(decode(b64encode(v), "ascii"))
+                    writer.write("\\\"")
+                elif isinstance(v, dict):
+                    write_dict(v)
+            writer.write('}')
         writer.write('{"statement":"')
         writer.write(self.statement.replace('"', '\\"').replace("\n", "\\n"))
         writer.write('"')
@@ -148,3 +175,6 @@ class Statement:
             writer.write(',"parameters":')
             writer.write(json.dumps(self.parameters, separators=(',', ':'), sort_keys=True))
         writer.write('}')
+
+
+

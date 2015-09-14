@@ -12,10 +12,10 @@ Feature: Commiting Changes
   Scenario: Committing Add Commands
     Given An empty repository
     When I commit add commands
-    Then The repository contains the added files
+    Then The repository contains the added file entities
 
   @database
   Scenario: Committing Delete Commands
     Given A repository with some files in in
     When I commit delete commands
-    Then The repository no longer contains the deleted files
+    Then The repository records that the file entities have been deleted
